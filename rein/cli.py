@@ -4,6 +4,7 @@ import re
 import random
 import string
 import requests
+import requesocks
 import hashlib
 import click
 from datetime import datetime
@@ -19,9 +20,9 @@ from lib.order import Order
 
 # Import helper functions
 from lib.ui import *
-from lib.validate import filter_and_parse_valid_sigs, parse_document 
+from lib.validate import filter_and_parse_valid_sigs, parse_document
 from lib.bitcoinecdsa import sign, pubkey
-from lib.market import * 
+from lib.market import *
 from lib.script import build_2_of_3, build_mandatory_multisig, check_redeem_scripts
 
 # Import config
@@ -36,8 +37,9 @@ rein = config.Config()
 
 @click.group()
 @click.option('--debug/--no-debug', default=False)
+@click.option('--tor/--no-tor', default=False)
 @click.pass_context
-def cli(ctx, debug):
+def cli(ctx, debug, tor):
     """
     Rein is a decentralized professional services market. Python-rein is a command-line
 interface to interact with Rein. Use this program to create an account, post a job, etc.
@@ -70,6 +72,16 @@ interface to interact with Rein. Use this program to create an account, post a j
     """
     if debug:
         click.echo("Debuggin'")
+
+    if tor:
+        session = requesocks.session()
+        session.proxies = {'http': 'socks5://127.0.0.1:9050',
+                           'https': 'socks5://127.0.0.1:9050'}
+        rein.requester = session
+        click.echo("Tor Enabled")
+    else:
+        rein.requester = requests
+
     pass
 
 
@@ -154,7 +166,7 @@ def post(multi, identity, defaults, dry_run):
         log.info("Querying %s for mediators..." % url)
         sel_url = "{0}query?owner={1}&query=mediators&testnet={2}"
         try:
-            answer = requests.get(url=sel_url.format(url, user.maddr, rein.testnet))
+            answer = rein.requester.get(url=sel_url.format(url, user.maddr, rein.testnet))
         except:
             click.echo('Error connecting to server.')
             log.error('server connect error ' + url)
@@ -228,7 +240,7 @@ def bid(multi, identity, defaults, dry_run):
     about, and create a bid. Your bid should include the amount of Bitcoin you need
     to complete the job and when you expect to have it complete.
     """
-    
+
     (log, user, key, urls) = init(multi, identity)
     form = {}
     if defaults:
@@ -238,11 +250,11 @@ def bid(multi, identity, defaults, dry_run):
     store = False if dry_run else True
 
     jobs = []
-    for url in urls:    
+    for url in urls:
         log.info("Querying %s for jobs..." % url)
         sel_url = "{0}query?owner={1}&query=jobs&testnet={2}"
         try:
-            answer = requests.get(url=sel_url.format(url, user.maddr, rein.testnet))
+            answer = rein.requester.get(url=sel_url.format(url, user.maddr, rein.testnet))
         except:
             click.echo('Error connecting to server.')
             log.error('server connect error ' + url)
@@ -262,7 +274,7 @@ def bid(multi, identity, defaults, dry_run):
         state = order.get_state(rein, Document)
         if state in ['job_posting', 'bid']:
             jobs.append(job)
-    
+
     if len(jobs) == 0:
         click.echo('None found')
         return
@@ -329,7 +341,7 @@ def offer(multi, identity, defaults, dry_run):
         log.info("Querying %s for bids on your jobs..." % url)
         sel_url = "{0}query?owner={1}&delegate={2}&query=bids&testnet={3}"
         try:
-            answer = requests.get(url=sel_url.format(url, user.maddr, user.daddr, rein.testnet))
+            answer = rein.requester.get(url=sel_url.format(url, user.maddr, user.daddr, rein.testnet))
         except:
             click.echo('Error connecting to server.')
             log.error('server connect error ' + url)
@@ -349,7 +361,7 @@ def offer(multi, identity, defaults, dry_run):
         state = order.get_state(rein, Document)
         if state in ['bid', 'job_posting']:
             bids.append(bid)
-    
+
     if len(bids) == 0:
         click.echo('None found')
         return
@@ -544,7 +556,7 @@ def accept(multi, identity, defaults, dry_run):
             click.echo("Accepted delivery. Run 'rein sync' to push to available servers.")
         log.info('accept signed') if res else log.error('accept failed')
     else:
-        click.echo("Accept aborted.") 
+        click.echo("Accept aborted.")
 
 
 @cli.command()
@@ -648,7 +660,7 @@ def workerdispute(multi, identity, defaults, dry_run):
         contents.append(document.contents)
 
     valid_results = filter_and_parse_valid_sigs(rein, contents)
-    
+
     if len(valid_results) == 0:
         click.echo('None found')
         return
@@ -701,7 +713,7 @@ def resolve(multi, identity, defaults, dry_run):
         log.info("Querying %s for jobs we're mediating..." % url)
         sel_url = "{0}query?owner={1}&query=review&mediator={2}&testnet={3}"
         try:
-            answer = requests.get(url=sel_url.format(url, user.maddr, key, rein.testnet))
+            answer = rein.requester.get(url=sel_url.format(url, user.maddr, key, rein.testnet))
         except:
             click.echo('Error connecting to server.')
             log.error('server connect error ' + url)
@@ -722,7 +734,7 @@ def resolve(multi, identity, defaults, dry_run):
         log.info("Querying %s for %s ..." % (url, job_ids_string))
         sel_url = "{0}query?owner={1}&job_ids={2}&query=by_job_id&testnet={3}"
         try:
-            answer = requests.get(url=sel_url.format(url, user.maddr, job_ids_string, rein.testnet))
+            answer = rein.requester.get(url=sel_url.format(url, user.maddr, job_ids_string, rein.testnet))
         except:
             click.echo('Error connecting to server.')
             log.error('server connect error ' + url)
@@ -791,7 +803,7 @@ def request(multi, identity, url):
     sel_url = "{0}request?owner={1}&delegate={2}&contact={3}"
 
     try:
-        answer = requests.get(url=sel_url.format(url, user.maddr, user.daddr, user.contact))
+        answer = rein.requester.get(url=sel_url.format(url, user.maddr, user.daddr, user.contact))
     except:
         click.echo('Error connecting to server.')
         log.error('server connect error ' + url)
@@ -847,7 +859,7 @@ def sync(multi, identity):
         nonce[url] = get_new_nonce(rein, url)
         if nonce[url] is None:
             continue
-        check = Document.get_user_documents(rein) 
+        check = Document.get_user_documents(rein)
         if len(check) == 0:
             click.echo("Nothing to do.")
 
@@ -857,14 +869,14 @@ def sync(multi, identity):
                 log.error("Document oversized %s" % doc.doc_hash)
             else:
                 placements = Placement.get_placements(rein, url, doc.id)
-                           
+
                 if len(placements) == 0:
                     upload.append([doc, url])
                 else:
                     for plc in placements:
                         if Placement.get_remote_document_hash(rein, plc) != doc.doc_hash:
                             upload.append([doc, url])
-    
+
     failed = []
     succeeded = 0
     for doc, url in upload:
@@ -916,7 +928,7 @@ def sync(multi, identity):
         if nonce[url] is None:
             continue
         sel_url = url + 'nonce?address={0}&clear={1}'
-        answer = requests.get(url=sel_url.format(user.maddr, nonce[url]))
+        answer = rein.requester.get(url=sel_url.format(user.maddr, nonce[url]))
         log.info('nonce cleared for %s' % (url))
 
     click.echo('%s docs checked on %s servers, %s uploads done.' % (len(check), len(urls), str(succeeded)))
@@ -941,9 +953,9 @@ def status(multi, identity, jobid):
         click.echo("Delegate bitcoin address: %s" % user.daddr)
         click.echo("Delegate public key: %s" % key)
         click.echo("Willing to mediate: %s" % user.will_mediate)
-        if user.will_mediate: 
+        if user.will_mediate:
             click.echo("Mediator fee: %s %%" % user.mediator_fee)
-        click.echo("Total document count: %s" % len(documents))   
+        click.echo("Total document count: %s" % len(documents))
         click.echo("Registered servers: ")
         for url in urls:
             click.echo("  " + url)
@@ -957,11 +969,11 @@ def status(multi, identity, jobid):
             click.echo("%s   %s   %s" % (order.id, order.job_id, past_tense))
     else:
         remote_documents = []
-        for url in urls:    
+        for url in urls:
             log.info("Querying %s for job id %s..." % (url, jobid))
             sel_url = "{0}query?owner={1}&query=by_job_id&job_ids={2}&testnet={3}"
             try:
-                answer = requests.get(url=sel_url.format(url, user.maddr, jobid, rein.testnet))
+                answer = rein.requester.get(url=sel_url.format(url, user.maddr, jobid, rein.testnet))
             except:
                 click.echo('Error connecting to server.')
                 log.error('server connect error ' + url)
@@ -1038,7 +1050,7 @@ def get_user(rein, identity):
 def get_new_nonce(rein, url):
     sel_url = url + 'nonce?address={0}'
     try:
-        answer = requests.get(url=sel_url.format(rein.user.maddr))
+        answer = rein.requester.get(url=sel_url.format(rein.user.maddr))
     except requests.exceptions.ConnectionError:
         click.echo('Could not reach %s.' % url)
         return None
@@ -1049,7 +1061,7 @@ def get_new_nonce(rein, url):
 
 def select_by_form(candidates, field, form):
    """
-   Iterate through array of dicts to match a key/value. 
+   Iterate through array of dicts to match a key/value.
    """
    if field in form.keys():
        for candidate in candidates:
